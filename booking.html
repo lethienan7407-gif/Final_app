@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MOVLY - Đặt xe thông minh</title>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+
+    <style>
+        :root { --midnight: #0f172a; --soft-blue: #6366f1; --pickup-bg: #f1f5f9; --dropoff-bg: #fff9db; }
+        body, html { margin: 0; font-family: 'Lexend', sans-serif; height: 100%; width: 100%; overflow: hidden; background: white; }
+
+        #search-screen { position: fixed; inset: 0; background: white; z-index: 9999; padding: 45px 20px; transition: 0.4s ease; }
+        .header { display: flex; align-items: center; margin-bottom: 20px; }
+        .route-card { background: white; border-radius: 20px; padding: 15px; box-shadow: 0 4px 25px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 10px; }
+        .input-item { display: flex; align-items: center; gap: 12px; padding: 12px 15px; border-radius: 12px; }
+        .pickup-box { background: var(--pickup-bg); }
+        .dropoff-box { background: var(--dropoff-bg); border: 1px solid #ffec99; }
+        input { border: none; background: transparent; outline: none; width: 100%; font-family: 'Lexend'; font-size: 15px; color: var(--midnight); }
+
+        #map-screen { position: fixed; inset: 0; z-index: 1000; visibility: hidden; }
+        #map { width: 100%; height: 100%; }
+        .bottom-sheet { position: absolute; bottom: 0; left: 0; right: 0; background: white; border-top-left-radius: 32px; border-top-right-radius: 32px; padding: 25px; box-shadow: 0 -10px 40px rgba(0,0,0,0.15); z-index: 10001; }
+
+        .info-card { display: flex; justify-content: space-between; align-items: center; background: #f8fafc; padding: 12px; border-radius: 15px; margin-bottom: 15px; border: 1px solid #e2e8f0; }
+        .vehicle-item { display: flex; justify-content: space-between; padding: 12px 15px; border-radius: 15px; background: #f8fafc; margin-bottom: 8px; border: 2px solid transparent; cursor: pointer; transition: 0.2s; }
+        .vehicle-item.active { border-color: var(--soft-blue); background: #eef2ff; }
+        .confirm-btn { background: var(--midnight); color: white; width: 100%; padding: 18px; border-radius: 18px; border: none; font-weight: 600; font-size: 16px; cursor: pointer; }
+
+        #finding-overlay { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.9); z-index: 20000; flex-direction: column; align-items: center; justify-content: center; color: white; text-align: center; }
+        .loader { border: 5px solid #334155; border-top: 5px solid var(--soft-blue); border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin-bottom: 20px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        #driver-card { display: none; position: fixed; bottom: 25px; left: 20px; right: 20px; background: white; z-index: 20001; padding: 20px; border-radius: 25px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); border: 2px solid var(--soft-blue); animation: slideUp 0.5s ease; }
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+        .slide-up { transform: translateY(-100%); }
+        .show-map { visibility: visible !important; }
+    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+</head>
+<body>
+
+    <div id="search-screen">
+        <div class="header">
+            <a href="/" style="color:var(--midnight); padding-right: 20px;"><i class="fa-solid fa-arrow-left"></i></a>
+            <h2 style="font-size: 17px; margin: 0;">Bạn muốn đi đâu?</h2>
+        </div>
+        <div class="route-card">
+            <div class="input-item pickup-box">
+                <div style="width:10px; height:10px; background:var(--soft-blue); border-radius:50%"></div>
+                <input type="text" id="pickup-input" placeholder="Nhập điểm đón..." value="Sân bay Tân Sơn Nhất">
+            </div>
+            <div class="input-item dropoff-box">
+                <div style="width:10px; height:10px; background:#f59e0b; border-radius:50%"></div>
+                <input type="text" id="dropoff-input" placeholder="Nhập điểm đến..." onkeydown="if(event.key==='Enter') startBooking()">
+            </div>
+        </div>
+        <p style="font-size: 13px; color: #94a3b8; margin: 25px 0 10px;">Gợi ý nhanh</p>
+        <div onclick="quickSelect('Chợ Bến Thành')" style="display:flex; align-items:center; gap:15px; padding:15px 0; border-bottom:1px solid #f1f5f9; cursor:pointer;">
+            <div style="width:38px; height:38px; background:#f1f5f9; border-radius:50%; display:flex; align-items:center; justify-content:center;"><i class="fa-solid fa-clock-rotate-left"></i></div>
+            <div><b>Chợ Bến Thành</b><span style="font-size:12px; color:#94a3b8; display:block">Quận 1, TP.HCM</span></div>
+        </div>
+    </div>
+
+    <div id="map-screen">
+        <div id="map"></div>
+        <div class="bottom-sheet" id="price-sheet">
+            <div style="width:40px; height:5px; background:#e2e8f0; border-radius:10px; margin:0 auto 15px;"></div>
+            <div class="info-card">
+                <div>
+                    <select id="weather-select" onchange="calculateFuzzy()" style="border:none; background:transparent; font-weight:bold; color:var(--soft-blue); outline:none;">
+                        <option value="2">☀️ Trời đẹp</option>
+                        <option value="5">☁️ Mưa nhẹ</option>
+                        <option value="9">🌧️ Mưa to</option>
+                    </select>
+                </div>
+                <div style="text-align: right;">
+                    <b id="dist-display">0.0 km</b>
+                    <p id="time-display" style="margin:0; font-size:11px; color:#64748b;">-- phút</p>
+                </div>
+            </div>
+            <div id="vehicle-list">
+                <div class="vehicle-item active" onclick="selectVehicle(this)">
+                    <span>🏍️ Xe máy (Bike)</span> <b id="price-bike">0đ</b>
+                </div>
+                <div class="vehicle-item" onclick="selectVehicle(this)">
+                    <span>🚗 Car 4 chỗ</span> <b id="price-car4">0đ</b>
+                </div>
+                <div class="vehicle-item" onclick="selectVehicle(this)">
+                    <span>🚙 Car 7 chỗ</span> <b id="price-car7">0đ</b>
+                </div>
+            </div>
+            <button class="confirm-btn" onclick="handleConfirm()">XÁC NHẬN ĐẶT XE</button>
+        </div>
+    </div>
+
+    <div id="finding-overlay">
+        <div class="loader"></div>
+        <h3 style="margin:0;">Đang tìm tài xế...</h3>
+        <p style="font-size:14px; opacity:0.8;">Hệ thống đang kết nối xe gần nhất</p>
+    </div>
+
+    <div id="driver-card">
+        <!-- ... phần nội dung driver card giữ nguyên ... -->
+        <div style="display:flex; align-items:center; gap:15px; margin-bottom:15px;">
+            <img src="https://ui-avatars.com/api/?name=Driver&background=6366f1&color=fff" style="width:55px; border-radius:50%;">
+            <div style="flex:1">
+                <h4 id="d-name" style="margin:0;">Tài xế đang đến</h4>
+                <p id="d-plate" style="margin:0; font-size:13px; color:#64748b; font-weight:bold;">BS: 59A - 000.00</p>
+            </div>
+            <div style="text-align:right">
+                <span id="d-dist" style="display:block; font-weight:bold; color:var(--soft-blue);">0.5 km</span>
+                <small style="color:#94a3b8;">Cách bạn</small>
+            </div>
+        </div>
+        <div style="background:#eef2ff; padding:12px; border-radius:15px; text-align:center; font-weight:600; color:#4338ca;">
+            🚀 Sẽ đón bạn trong <span id="d-wait">--</span> phút
+        </div>
+        <button onclick="location.reload()" style="width:100%; margin-top:15px; border:none; background:none; color:#ef4444; font-size:13px; cursor:pointer; font-weight:500;">HỦY CHUYẾN</button>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+    
+    <script>
+        var map = L.map('map', { zoomControl: false }).setView([10.8231, 106.6297], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        var curDist = 0, routeControl;
+        var priceCache = {}; // 1. KHỞI TẠO CACHE GIÁ TIỀN
+
+        function quickSelect(dest) {
+            document.getElementById('dropoff-input').value = dest;
+            startBooking();
+        }
+
+        async function startBooking() {
+            priceCache = {}; // 2. RESET CACHE KHI ĐỔI LỘ TRÌNH MỚI
+            
+            const pickupAddr = document.getElementById('pickup-input').value;
+            const dropoffAddr = document.getElementById('dropoff-input').value;
+
+            if(!pickupAddr || !dropoffAddr) return;
+
+            document.getElementById('search-screen').classList.add('slide-up');
+            document.getElementById('map-screen').classList.add('show-map');
+            setTimeout(() => map.invalidateSize(), 400);
+
+            const [resP, resD] = await Promise.all([
+                fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(pickupAddr + " HCM")}&limit=1`),
+                fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(dropoffAddr + " HCM")}&limit=1`)
+            ]);
+
+            const dataP = await resP.json();
+            const dataD = await resD.json();
+            
+            if(dataP.length > 0 && dataD.length > 0) {
+                const start = [parseFloat(dataP[0].lat), parseFloat(dataP[0].lon)];
+                const end = [parseFloat(dataD[0].lat), parseFloat(dataD[0].lon)];
+
+                if(routeControl) map.removeControl(routeControl);
+                routeControl = L.Routing.control({
+                    waypoints: [L.latLng(start[0], start[1]), L.latLng(end[0], end[1])],
+                    lineOptions: { styles: [{ color: '#6366f1', weight: 6 }] },
+                    createMarker: () => null
+                }).on('routesfound', function(e) {
+                    curDist = e.routes[0].summary.totalDistance / 1000;
+                    calculateFuzzy(); // Gọi tính tiền lần đầu
+                    map.fitBounds([start, end], { paddingBottomRight: [0, 400] });
+                }).addTo(map);
+            }
+        }
+
+        // 3. CẬP NHẬT HÀM TÍNH TIỀN CÓ SỬ DỤNG CACHE
+        function calculateFuzzy() {
+            const weatherVal = document.getElementById('weather-select').value;
+
+            // Kiểm tra nếu thời tiết này đã được tính giá trên lộ trình này rồi
+            if (priceCache[weatherVal]) {
+                displayPrices(priceCache[weatherVal]);
+                return;
+            }
+
+            fetch('/calculate_price', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ distance: curDist, weather: weatherVal })
+            })
+            .then(res => res.json())
+            .then(d => {
+                priceCache[weatherVal] = d; // Lưu vào cache
+                displayPrices(d);
+            });
+        }
+
+        // 4. HÀM HIỂN THỊ ĐỒNG BỘ
+        function displayPrices(d) {
+            document.getElementById('dist-display').innerText = d.dist_km + " km";
+            document.getElementById('time-display').innerText = d.time + " phút di chuyển";
+            document.getElementById('price-bike').innerText = d.prices.bike.toLocaleString() + "đ";
+            document.getElementById('price-car4').innerText = d.prices.car4.toLocaleString() + "đ";
+            document.getElementById('price-car7').innerText = d.prices.car7.toLocaleString() + "đ";
+        }
+
+        function handleConfirm() {
+            document.getElementById('finding-overlay').style.display = 'flex';
+            setTimeout(() => {
+                document.getElementById('finding-overlay').style.display = 'none';
+                document.getElementById('price-sheet').style.display = 'none';
+                const d_names = ["Nguyễn Minh Tuấn", "Phạm Hoàng Long", "Lê Văn Tám"];
+                const d_plates = ["59G1-123.45", "50A-888.99", "59B2-555.66"];
+                const rand_dist = (Math.random() * (3.0 - 0.5) + 0.5).toFixed(1);
+                document.getElementById('d-name').innerText = d_names[Math.floor(Math.random()*3)];
+                document.getElementById('d-plate').innerText = d_plates[Math.floor(Math.random()*3)];
+                document.getElementById('d-dist').innerText = rand_dist + " km";
+                document.getElementById('d-wait').innerText = Math.ceil(rand_dist * 3);
+                document.getElementById('driver-card').style.display = 'block';
+            }, 3000);
+        }
+
+        function selectVehicle(el) {
+            document.querySelectorAll('.vehicle-item').forEach(i => i.classList.remove('active'));
+            el.classList.add('active');
+        }
+    </script>
+   <!-- =========================================================
+     HỆ THỐNG ĐÁNH GIÁ ĐA TẦNG (TÀI XẾ & APP) - MOVLY
+     ========================================================= -->
+
+<!-- 1. NÚT KÍCH HOẠT TRÊN MÀN HÌNH (DỰ PHÒNG CHO PHÍM TẮT) -->
+<div id="floating-finish-btn" onclick="openFullRating()" style="
+    position: fixed; bottom: 30px; right: 30px; width: 65px; height: 65px;
+    background: linear-gradient(135deg, #2ecc71, #27ae60); color: white;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 26px; cursor: pointer; box-shadow: 0 10px 25px rgba(46, 204, 113, 0.4);
+    z-index: 1000000; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    border: 3px solid white;
+">
+    <span style="transform: translateY(-2px);">🏁</span>
+</div>
+
+<!-- 2. MODAL ĐÁNH GIÁ TỔNG HỢP -->
+<div id="movly-full-modal" style="
+    display: none; position: fixed; z-index: 1000001; left: 0; top: 0;
+    width: 100%; height: 100%; background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    align-items: center; justify-content: center;
+">
+    <div style="
+        background: white; padding: 35px; border-radius: 30px;
+        width: 90%; max-width: 400px; text-align: center;
+        box-shadow: 0 25px 50px rgba(0,0,0,0.3);
+        animation: popIn 0.4s ease-out;
+    ">
+        
+        <!-- BƯỚC 1: ĐÁNH GIÁ TÀI XẾ -->
+        <div id="step-driver">
+            <div style="font-size: 45px; margin-bottom: 10px;">👨‍✈️</div>
+            <h2 style="margin: 0; color: #2d3436;">Đánh giá Tài xế</h2>
+            <p style="color: #636e72; font-size: 15px;">Tài xế phục vụ bạn thế nào?</p>
+            <div class="star-container" id="stars-driver" style="font-size: 40px; margin: 20px 0; cursor: pointer; color: #dfe6e9;">
+                <span data-v="1">★</span><span data-v="2">★</span><span data-v="3">★</span><span data-v="4">★</span><span data-v="5">★</span>
+            </div>
+            <button onclick="nextStep('app')" id="btn-next-app" disabled style="width: 100%; padding: 15px; background: #ccc; color: white; border: none; border-radius: 12px; font-weight: bold; cursor: not-allowed;">TIẾP TỤC</button>
+        </div>
+
+        <!-- BƯỚC 2: ĐÁNH GIÁ ỨNG DỤNG (ẨN) -->
+        <div id="step-app" style="display: none;">
+            <div style="font-size: 45px; margin-bottom: 10px;">📱</div>
+            <h2 style="margin: 0; color: #2d3436;">Đánh giá App</h2>
+            <p style="color: #636e72; font-size: 15px;">Bạn thấy ứng dụng có dễ dùng không?</p>
+            <div class="star-container" id="stars-app" style="font-size: 40px; margin: 20px 0; cursor: pointer; color: #dfe6e9;">
+                <span data-v="1">★</span><span data-v="2">★</span><span data-v="3">★</span><span data-v="4">★</span><span data-v="5">★</span>
+            </div>
+            <button onclick="nextStep('thanks')" id="btn-next-thanks" disabled style="width: 100%; padding: 15px; background: #ccc; color: white; border: none; border-radius: 12px; font-weight: bold; cursor: not-allowed;">GỬI ĐÁNH GIÁ</button>
+        </div>
+
+        <!-- BƯỚC 3: CẢM ƠN (ẨN) -->
+        <div id="step-final-thanks" style="display: none;">
+            <div style="font-size: 60px; margin-bottom: 15px;">✨</div>
+            <h2 style="margin: 0; color: #2ecc71;">Cảm ơn bạn!</h2>
+            <p style="color: #636e72; font-size: 17px; line-height: 1.6; margin-top: 15px;">
+                Cảm ơn bạn đã đồng hành cùng <b>MOVLY</b>.<br>Ý kiến của bạn giúp chúng tôi tốt hơn!
+            </p>
+            <div style="margin-top: 20px; color: #b2bec3; font-size: 13px;">Đang quay về trang chủ...</div>
+        </div>
+
+    </div>
+</div>
+
+<style>
+    @keyframes popIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+    .star-container span { transition: 0.2s; display: inline-block; }
+    .star-container span:hover { transform: scale(1.2); }
+</style>
+<Style>
+    /* Tối ưu hiển thị điện thoại */
+@media (max-width: 768px) {
+    /* Ngăn web bị xô lệch ngang */
+    html, body {
+        width: 100%;
+        overflow-x: hidden;
+        position: relative;
+    }
+
+    /* Phóng to các ô nhập liệu để ngón tay dễ bấm */
+    input[type="text"], select, button {
+        font-size: 16px !important; /* iPhone sẽ không bị tự động zoom màn hình khi gõ */
+        height: auto;
+        padding: 12px !important;
+    }
+
+    /* Điều chỉnh các bảng trượt (như bảng Settings hay Đánh giá) */
+    #movly-settings-panel, #movly-full-modal > div {
+        width: 85% !important; /* Chiếm gần hết chiều ngang điện thoại */
+    }
+
+    /* Nếu bạn có thanh menu dưới đáy (bottom bar) */
+    .bottom-nav, .footer-menu {
+        padding-bottom: 20px; /* Thêm khoảng trống cho các dòng máy tràn viền */
+    }
+}
+</Style></Tyle>
+
+<script>
+    // 1. Hàm mở Modal
+    function openFullRating() {
+        document.getElementById('movly-full-modal').style.display = 'flex';
+    }
+
+    // 2. Logic chọn sao
+    function setupStars(containerId, btnId) {
+        const container = document.getElementById(containerId);
+        const stars = container.querySelectorAll('span');
+        const btn = document.getElementById(btnId);
+
+        stars.forEach(star => {
+            star.onclick = function() {
+                const val = this.getAttribute('data-v');
+                stars.forEach((s, i) => s.style.color = (i < val) ? '#f1c40f' : '#dfe6e9');
+                btn.disabled = false;
+                btn.style.background = '#2ecc71';
+                btn.style.cursor = 'pointer';
+            };
+        });
+    }
+
+    // 3. Chuyển bước
+    function nextStep(step) {
+        document.getElementById('step-driver').style.display = 'none';
+        document.getElementById('step-app').style.display = 'none';
+        
+        if (step === 'app') {
+            document.getElementById('step-app').style.display = 'block';
+        } else if (step === 'thanks') {
+            document.getElementById('step-final-thanks').style.display = 'block';
+            setTimeout(() => { window.location.href = "/"; }, 3500);
+        }
+    }
+
+    // Khởi tạo
+    document.addEventListener('DOMContentLoaded', () => {
+        setupStars('stars-driver', 'btn-next-app');
+        setupStars('stars-app', 'btn-next-thanks');
+        
+        // Phím tắt F
+        window.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() === 'f') openFullRating();
+        });
+    });
+</script>
+</body>
+</html>
+
